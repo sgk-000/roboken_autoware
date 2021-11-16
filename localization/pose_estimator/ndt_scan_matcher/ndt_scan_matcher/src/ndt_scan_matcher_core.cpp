@@ -46,7 +46,7 @@ NDTScanMatcher::NDTScanMatcher()
   base_frame_("base_link"),
   ndt_base_frame_("ndt_base_link"),
   map_frame_("map"),
-  converged_param_transform_probability_(4.5),
+  converged_param_transform_probability_(3.0),
   inversion_vector_threshold_(-0.9),
   oscillation_threshold_(10)
 {

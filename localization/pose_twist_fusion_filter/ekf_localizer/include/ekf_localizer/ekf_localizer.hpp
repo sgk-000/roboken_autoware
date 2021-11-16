@@ -21,6 +21,7 @@
 #include <vector>
 #include <string>
 
+#include "nav_msgs/msg/odometry.hpp"
 #include "geometry_msgs/msg/pose_array.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
@@ -32,6 +33,7 @@
 #include "autoware_debug_msgs/msg/float64_multi_array_stamped.hpp"
 #include "tf2/LinearMath/Quaternion.h"
 #include "tf2/utils.h"
+#include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_broadcaster.h"
 #include "tf2_ros/transform_listener.h"
 
@@ -44,6 +46,8 @@ public:
   EKFLocalizer(const std::string & node_name, const rclcpp::NodeOptions & options);
 
 private:
+  //!< @brief ekf estimated odom publisher
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_odom_;
   //!< @brief ekf estimated pose publisher
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pub_pose_;
   //!< @brief estimated ekf pose with covariance publisher
@@ -150,6 +154,9 @@ private:
   std::array<double, 36ul> current_pose_covariance_;
   std::array<double, 36ul> current_twist_covariance_;
 
+  tf2_ros::Buffer tf_buffer_;
+  tf2_ros::TransformListener tf_listener_;
+
   /**
    * @brief computes update & prediction of EKF for each ekf_dt_[s] time
    */
@@ -226,13 +233,13 @@ private:
     std::string parent_frame, std::string child_frame,
     geometry_msgs::msg::TransformStamped & transform);
 
+
   /**
    * @brief normalize yaw angle
    * @param yaw yaw angle
    * @return normalized yaw
    */
   double normalizeYaw(const double & yaw) const;
-
   /**
    * @brief create quaternion from roll, pitch and yaw.
    */

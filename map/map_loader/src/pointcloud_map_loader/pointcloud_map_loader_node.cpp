@@ -95,8 +95,9 @@ PointCloudMapLoaderNode::PointCloudMapLoaderNode(const rclcpp::NodeOptions & opt
     RCLCPP_ERROR(get_logger(), "No PCD was loaded: pcd_paths.size() = %zu", pcd_paths.size());
     return;
   }
-
+  std::cout << "pcd size =" << pcd.data.size() << std::endl;
   pub_pointcloud_map_->publish(pcd);
+  std::cout << "pointcloud map published" << std::endl;
 }
 
 sensor_msgs::msg::PointCloud2 PointCloudMapLoaderNode::loadPCDFiles(

@@ -30,7 +30,7 @@
 using std::placeholders::_1;
 
 EKFLocalizer::EKFLocalizer(const std::string & node_name, const rclcpp::NodeOptions & node_options)
-: rclcpp::Node(node_name, node_options), dim_x_(6 /* x, y, yaw, yaw_bias, vx, wz */)
+: rclcpp::Node(node_name, node_options), dim_x_(6 /* x, y, yaw, yaw_bias, vx, wz */), tf_buffer_(this->get_clock()), tf_listener_(tf_buffer_)
 {
   show_debug_info_ = declare_parameter("show_debug_info", false);
   ekf_rate_ = declare_parameter("predict_frequency", 50.0);
@@ -99,6 +99,7 @@ EKFLocalizer::EKFLocalizer(const std::string & node_name, const rclcpp::NodeOpti
     this->get_node_base_interface()->get_context());
   this->get_node_timers_interface()->add_timer(timer_tf_, nullptr);
 
+  pub_odom_ = create_publisher<nav_msgs::msg::Odometry>("ekf_odom", 1);
   pub_pose_ = create_publisher<geometry_msgs::msg::PoseStamped>("ekf_pose", 1);
   pub_pose_cov_ =
     create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("ekf_pose_with_covariance", 1);
@@ -260,18 +261,33 @@ void EKFLocalizer::timerTFCallback()
 {
   if (current_ekf_pose_.header.frame_id == "") {return;}
 
-  geometry_msgs::msg::TransformStamped transformStamped;
-  transformStamped.header.stamp = this->now();
-  transformStamped.header.frame_id = current_ekf_pose_.header.frame_id;
-  transformStamped.child_frame_id = "base_link";
-  transformStamped.transform.translation.x = current_ekf_pose_.pose.position.x;
-  transformStamped.transform.translation.y = current_ekf_pose_.pose.position.y;
-  transformStamped.transform.translation.z = current_ekf_pose_.pose.position.z;
+  //map to odom
+  geometry_msgs::msg::TransformStamped odom_transform;
 
-  transformStamped.transform.rotation.x = current_ekf_pose_.pose.orientation.x;
-  transformStamped.transform.rotation.y = current_ekf_pose_.pose.orientation.y;
-  transformStamped.transform.rotation.z = current_ekf_pose_.pose.orientation.z;
-  transformStamped.transform.rotation.w = current_ekf_pose_.pose.orientation.w;
+  try {
+  odom_transform = tf_buffer_.lookupTransform(
+  "odom", "base_link", current_ekf_pose_.header.stamp, rclcpp::Duration::from_seconds(1.0));
+  } catch (tf2::TransformException & ex) {
+    RCLCPP_WARN(get_logger(), "%s", ex.what());
+    RCLCPP_ERROR(
+      this->get_logger(), "[EKF] TF transform failed. parent = %s, child = %s", "odom", "base_link");
+  }
+  tf2::Transform odom_tf;
+  tf2::convert(odom_transform.transform, odom_tf);
+  tf2::Quaternion ekf_quat;
+  tf2::convert(current_ekf_pose_.pose.orientation, ekf_quat);
+  tf2::Transform ekf_tf(ekf_quat, tf2::Vector3(
+    current_ekf_pose_.pose.position.x,
+    current_ekf_pose_.pose.position.y,
+    current_ekf_pose_.pose.position.z));
+
+  tf2::Transform map_to_odom_tf;
+  geometry_msgs::msg::TransformStamped transformStamped;
+  transformStamped.header.stamp = current_ekf_pose_.header.stamp;
+  transformStamped.header.frame_id = current_ekf_pose_.header.frame_id;
+  transformStamped.child_frame_id = "odom";
+  map_to_odom_tf = ekf_tf * odom_tf.inverse();
+  transformStamped.transform = tf2::toMsg(map_to_odom_tf);
 
   tf_br_->sendTransform(transformStamped);
 }
@@ -778,6 +794,32 @@ void EKFLocalizer::publishEstimateResult()
   twist_cov.twist.covariance[30] = P(IDX::WZ, IDX::VX);
   twist_cov.twist.covariance[35] = P(IDX::WZ, IDX::WZ);
   pub_twist_cov_->publish(twist_cov);
+
+  nav_msgs::msg::Odometry odom;
+  geometry_msgs::msg::PoseWithCovariance odom_pose;
+  geometry_msgs::msg::TwistWithCovariance odom_twist;
+  odom_pose.pose = current_ekf_pose_no_yawbias_.pose;
+  odom_pose.covariance[0] = P(IDX::X, IDX::X);
+  odom_pose.covariance[1] = P(IDX::X, IDX::Y);
+  odom_pose.covariance[5] = P(IDX::X, IDX::YAW);
+  odom_pose.covariance[6] = P(IDX::Y, IDX::X);
+  odom_pose.covariance[7] = P(IDX::Y, IDX::Y);
+  odom_pose.covariance[11] = P(IDX::Y, IDX::YAW);
+  odom_pose.covariance[30] = P(IDX::YAW, IDX::X);
+  odom_pose.covariance[31] = P(IDX::YAW, IDX::Y);
+  odom_pose.covariance[35] = P(IDX::YAW, IDX::YAW);
+
+  odom_twist.twist = current_ekf_twist_.twist;
+  odom_twist.covariance[0] = P(IDX::VX, IDX::VX);
+  odom_twist.covariance[5] = P(IDX::VX, IDX::WZ);
+  odom_twist.covariance[30] = P(IDX::WZ, IDX::VX);
+  odom_twist.covariance[35] = P(IDX::WZ, IDX::WZ);
+  
+  odom.header.stamp = current_time;
+  odom.header.frame_id = current_ekf_pose_.header.frame_id;
+  odom.pose = odom_pose;
+  odom.twist = odom_twist;
+  pub_odom_->publish(odom);
 
   /* publish yaw bias */
   autoware_debug_msgs::msg::Float64Stamped yawb;
