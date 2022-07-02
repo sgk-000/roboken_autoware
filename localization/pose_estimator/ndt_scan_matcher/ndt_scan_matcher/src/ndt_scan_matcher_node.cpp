@@ -12,14 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "rclcpp/rclcpp.hpp"
-
 #include "ndt_scan_matcher/ndt_scan_matcher_core.hpp"
+
+#include <rclcpp/rclcpp.hpp>
 
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<NDTScanMatcher>());
+  auto ndt_scan_matcher = std::make_shared<NDTScanMatcher>();
+  rclcpp::executors::MultiThreadedExecutor exec;
+  exec.add_node(ndt_scan_matcher);
+  exec.spin();
   rclcpp::shutdown();
   return 0;
 }
